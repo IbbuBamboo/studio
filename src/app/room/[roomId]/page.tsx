@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 import { VideoGrid } from '@/components/room/VideoGrid';
@@ -19,6 +19,7 @@ export interface Participant {
   isMuted: boolean;
   isVideoOff: boolean;
   isLocal?: boolean;
+  isScreenSharing?: boolean;
 }
 
 export interface Message {
@@ -39,9 +40,13 @@ function RoomPageContent() {
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const userStreamRef = useRef<MediaStream | null>(null);
+
 
   useEffect(() => {
     const setupLocalParticipant = (stream: MediaStream | null) => {
+      userStreamRef.current = stream;
       const localParticipant: Participant = {
         id: 'local',
         name: `${displayName} (You)`,
@@ -49,6 +54,7 @@ function RoomPageContent() {
         isMuted: stream === null,
         isVideoOff: stream === null,
         isLocal: true,
+        isScreenSharing: false,
       };
       setParticipants(prev => [localParticipant, ...prev.filter(p => !p.isLocal)]);
     };
@@ -67,27 +73,10 @@ function RoomPageContent() {
         setupLocalParticipant(null);
       });
       
-    // Mock other participants joining
-    setTimeout(() => {
-      const mockParticipant1: Participant = {
-        id: 'peer-1', name: 'Alice', stream: new MediaStream(), isMuted: true, isVideoOff: false
-      };
-      setParticipants(prev => [...prev, mockParticipant1]);
-    }, 1500);
-    setTimeout(() => {
-      const mockParticipant2: Participant = {
-        id: 'peer-2', name: 'Bob', stream: new MediaStream(), isMuted: false, isVideoOff: true
-      };
-      setParticipants(prev => [...prev, mockParticipant2]);
-    }, 2500);
-
-    // Mock incoming messages
-    setTimeout(() => {
-      addMessage({ sender: 'Alice', content: 'Hey everyone!' });
-    }, 3500);
-
     return () => {
       participants.forEach(p => p.stream?.getTracks().forEach(track => track.stop()));
+      userStreamRef.current?.getTracks().forEach(track => track.stop());
+      screenStreamRef.current?.getTracks().forEach(track => track.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -114,18 +103,71 @@ function RoomPageContent() {
     toast({ title: 'Link Copied!', description: 'You can now share this link with others.' });
   };
 
+  const setLocalParticipantStream = (stream: MediaStream | null) => {
+     setParticipants(prev => prev.map(p => {
+        if (p.isLocal) {
+            return { ...p, stream };
+        }
+        return p;
+     }));
+  }
+
+  const handleToggleScreenShare = async () => {
+    const localParticipant = participants.find(p => p.isLocal);
+    if (!localParticipant) return;
+
+    if (localParticipant.isScreenSharing) {
+        screenStreamRef.current?.getTracks().forEach(track => track.stop());
+        screenStreamRef.current = null;
+        setLocalParticipantStream(userStreamRef.current);
+        setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: false, isVideoOff: !userStreamRef.current?.getVideoTracks()[0]?.enabled} : p));
+    } else {
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            screenStreamRef.current = stream;
+            setLocalParticipantStream(stream);
+            setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: true, isVideoOff: false} : p));
+
+            stream.getVideoTracks()[0].onended = () => {
+                screenStreamRef.current = null;
+                setLocalParticipantStream(userStreamRef.current);
+                setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: false, isVideoOff: !userStreamRef.current?.getVideoTracks()[0]?.enabled} : p));
+            };
+        } catch (err) {
+            console.error('Failed to get screen share stream', err);
+            toast({ variant: 'destructive', title: 'Could not share screen' });
+        }
+    }
+  };
+
+
   const toggleMedia = (type: 'audio' | 'video') => {
     setParticipants(prev => prev.map(p => {
       if (p.isLocal) {
-        if (!p.stream) {
+        if (p.isScreenSharing && type === 'video') {
+            toast({ title: 'Cannot turn off video while screen sharing.' });
+            return p;
+        }
+
+        const streamToToggle = p.isScreenSharing ? screenStreamRef.current : userStreamRef.current;
+        if (!streamToToggle) {
             toast({ variant: 'destructive', title: 'Media not available', description: 'Could not find a camera or microphone.' });
             return p;
         }
-        p.stream?.getTracks().forEach(track => {
+
+        let mediaChanged = false;
+        streamToToggle.getTracks().forEach(track => {
           if (track.kind === type) {
             track.enabled = !track.enabled;
+            mediaChanged = true;
           }
         });
+        
+        if (!mediaChanged) {
+            toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
+            return p;
+        }
+
         return { ...p, isMuted: type === 'audio' ? !p.isMuted : p.isMuted, isVideoOff: type === 'video' ? !p.isVideoOff : p.isVideoOff };
       }
       return p;
@@ -171,7 +213,7 @@ function RoomPageContent() {
             onLeave={handleLeave}
             onToggleMute={() => toggleMedia('audio')}
             onToggleVideo={() => toggleMedia('video')}
-            onToggleScreenShare={() => toast({ title: 'Screen sharing is not yet implemented.' })}
+            onToggleScreenShare={handleToggleScreenShare}
             localParticipant={participants.find(p => p.isLocal)}
           />
         </div>

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Mic, MicOff, Video, VideoOff, ScreenShare, ScreenShareOff, PhoneOff, Settings } from 'lucide-react';
 import type { Participant } from '@/app/room/[roomId]/page';
+import { cn } from '@/lib/utils';
 
 interface MediaControlsProps {
   onLeave: () => void;
@@ -15,7 +16,7 @@ interface MediaControlsProps {
 export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleScreenShare, localParticipant }: MediaControlsProps) {
   const isMuted = localParticipant?.isMuted ?? true;
   const isVideoOff = localParticipant?.isVideoOff ?? true;
-  const isScreenSharing = false; // Mocked
+  const isScreenSharing = localParticipant?.isScreenSharing ?? false;
   const hasMedia = !!localParticipant?.stream;
 
   return (
@@ -23,7 +24,7 @@ export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleSc
       <div className="flex justify-center items-center gap-2 md:gap-4 p-4 mt-auto bg-card rounded-xl shadow-lg w-full max-w-xl mx-auto">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={isMuted ? "destructive" : "outline"} size="lg" className="rounded-full w-14 h-14 md:w-16 md:h-16" onClick={onToggleMute} disabled={!hasMedia}>
+            <Button variant={isMuted ? "destructive" : "outline"} size="lg" className="rounded-full w-14 h-14 md:w-16 md:h-16" onClick={onToggleMute} disabled={!localParticipant?.stream?.getAudioTracks().length}>
               {isMuted ? <MicOff className="w-6 h-6 md:w-7 md:h-7" /> : <Mic className="w-6 h-6 md:w-7 md:h-7" />}
             </Button>
           </TooltipTrigger>
@@ -32,7 +33,7 @@ export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleSc
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={isVideoOff ? "destructive" : "outline"} size="lg" className="rounded-full w-14 h-14 md:w-16 md:h-16" onClick={onToggleVideo} disabled={!hasMedia}>
+            <Button variant={isVideoOff ? "destructive" : "outline"} size="lg" className="rounded-full w-14 h-14 md:w-16 md:h-16" onClick={onToggleVideo} disabled={isScreenSharing || !localParticipant?.stream?.getVideoTracks().length}>
               {isVideoOff ? <VideoOff className="w-6 h-6 md:w-7 md:h-7" /> : <Video className="w-6 h-6 md:w-7 md:h-7" />}
             </Button>
           </TooltipTrigger>
@@ -41,7 +42,7 @@ export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleSc
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="lg" className="rounded-full w-14 h-14 md:w-16 md:h-16" onClick={onToggleScreenShare}>
+            <Button variant="outline" size="lg" className={cn("rounded-full w-14 h-14 md:w-16 md:h-16", isScreenSharing && "bg-blue-500 text-white hover:bg-blue-600")} onClick={onToggleScreenShare}>
               {isScreenSharing ? <ScreenShareOff className="w-6 h-6 md:w-7 md:h-7" /> : <ScreenShare className="w-6 h-6 md:w-7 md:h-7" />}
             </Button>
           </TooltipTrigger>
