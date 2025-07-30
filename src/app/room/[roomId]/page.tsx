@@ -41,41 +41,45 @@ function RoomPageContent() {
   const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
+    const setupLocalParticipant = (stream: MediaStream | null) => {
+      const localParticipant: Participant = {
+        id: 'local',
+        name: `${displayName} (You)`,
+        stream,
+        isMuted: stream === null,
+        isVideoOff: stream === null,
+        isLocal: true,
+      };
+      setParticipants(prev => [localParticipant, ...prev.filter(p => !p.isLocal)]);
+    };
+
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
-        const localParticipant: Participant = {
-          id: 'local',
-          name: `${displayName} (You)`,
-          stream,
-          isMuted: false,
-          isVideoOff: false,
-          isLocal: true,
-        };
-        setParticipants(prev => [localParticipant, ...prev]);
-
-        // Mock other participants joining
-        setTimeout(() => {
-          const mockParticipant1: Participant = {
-            id: 'peer-1', name: 'Alice', stream: new MediaStream(), isMuted: true, isVideoOff: false
-          };
-          setParticipants(prev => [...prev, mockParticipant1]);
-        }, 1500);
-        setTimeout(() => {
-          const mockParticipant2: Participant = {
-            id: 'peer-2', name: 'Bob', stream: new MediaStream(), isMuted: false, isVideoOff: true
-          };
-          setParticipants(prev => [...prev, mockParticipant2]);
-        }, 2500);
+        setupLocalParticipant(stream);
       })
       .catch(err => {
         console.error('Failed to get local stream', err);
         toast({
           variant: 'destructive',
-          title: 'Error',
-          description: 'Could not access camera and microphone. Please check permissions.',
+          title: 'No Camera/Mic Access',
+          description: 'You can still participate in chat.',
         });
-        router.push('/');
+        setupLocalParticipant(null);
       });
+      
+    // Mock other participants joining
+    setTimeout(() => {
+      const mockParticipant1: Participant = {
+        id: 'peer-1', name: 'Alice', stream: new MediaStream(), isMuted: true, isVideoOff: false
+      };
+      setParticipants(prev => [...prev, mockParticipant1]);
+    }, 1500);
+    setTimeout(() => {
+      const mockParticipant2: Participant = {
+        id: 'peer-2', name: 'Bob', stream: new MediaStream(), isMuted: false, isVideoOff: true
+      };
+      setParticipants(prev => [...prev, mockParticipant2]);
+    }, 2500);
 
     // Mock incoming messages
     setTimeout(() => {
@@ -113,6 +117,10 @@ function RoomPageContent() {
   const toggleMedia = (type: 'audio' | 'video') => {
     setParticipants(prev => prev.map(p => {
       if (p.isLocal) {
+        if (!p.stream) {
+            toast({ variant: 'destructive', title: 'Media not available', description: 'Could not find a camera or microphone.' });
+            return p;
+        }
         p.stream?.getTracks().forEach(track => {
           if (track.kind === type) {
             track.enabled = !track.enabled;
