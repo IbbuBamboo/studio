@@ -9,7 +9,6 @@ import { ChatSidebar } from '@/components/room/ChatSidebar';
 import { Button } from '@/components/ui/button';
 import { Users, MessageSquare, MessageSquareOff, Copy } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
 export interface Participant {
@@ -103,76 +102,92 @@ function RoomPageContent() {
     navigator.clipboard.writeText(window.location.href);
     toast({ title: 'Link Copied!', description: 'You can now share this link with others.' });
   };
-
-  const setLocalParticipantStream = (stream: MediaStream | null) => {
-     setParticipants(prev => prev.map(p => {
-        if (p.isLocal) {
-            return { ...p, stream };
-        }
-        return p;
-     }));
-  }
+  
+  const updateLocalParticipant = (updates: Partial<Participant>) => {
+    setParticipants(prev =>
+      prev.map(p => (p.isLocal ? { ...p, ...updates } : p))
+    );
+  };
 
   const handleToggleScreenShare = async () => {
     const localParticipant = participants.find(p => p.isLocal);
     if (!localParticipant) return;
 
     if (localParticipant.isScreenSharing) {
-        screenStreamRef.current?.getTracks().forEach(track => track.stop());
-        screenStreamRef.current = null;
-        setLocalParticipantStream(userStreamRef.current);
-        setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: false, isVideoOff: !userStreamRef.current?.getVideoTracks()[0]?.enabled} : p));
-    } else {
-        try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-            screenStreamRef.current = stream;
-            setLocalParticipantStream(stream);
-            setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: true, isVideoOff: false} : p));
+      screenStreamRef.current?.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+      
+      const isVideoStillOff = userStreamRef.current?.getVideoTracks().every(t => !t.enabled) ?? true;
+      
+      updateLocalParticipant({ 
+        stream: userStreamRef.current, 
+        isScreenSharing: false,
+        isVideoOff: isVideoStillOff,
+      });
 
-            stream.getVideoTracks()[0].onended = () => {
-                screenStreamRef.current = null;
-                setLocalParticipantStream(userStreamRef.current);
-                setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: false, isVideoOff: !userStreamRef.current?.getVideoTracks()[0]?.enabled} : p));
-            };
-        } catch (err) {
-            console.error('Failed to get screen share stream', err);
-            toast({ variant: 'destructive', title: 'Could not share screen' });
-        }
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        
+        stream.getVideoTracks()[0].onended = () => {
+          screenStreamRef.current = null;
+          const isVideoStillOff = userStreamRef.current?.getVideoTracks().every(t => !t.enabled) ?? true;
+          updateLocalParticipant({ 
+            stream: userStreamRef.current, 
+            isScreenSharing: false,
+            isVideoOff: isVideoStillOff,
+          });
+        };
+        
+        screenStreamRef.current = stream;
+        updateLocalParticipant({ 
+          stream: stream, 
+          isScreenSharing: true, 
+          isVideoOff: false 
+        });
+
+      } catch (err) {
+        console.error('Failed to get screen share stream', err);
+        toast({ variant: 'destructive', title: 'Could not share screen' });
+      }
     }
   };
 
-
   const toggleMedia = (type: 'audio' | 'video') => {
-    setParticipants(prev => prev.map(p => {
-      if (p.isLocal) {
-        if (p.isScreenSharing && type === 'video') {
-            toast({ title: 'Cannot turn off video while screen sharing.' });
-            return p;
-        }
+    const localParticipant = participants.find(p => p.isLocal);
+    if (!localParticipant) return;
+    
+    if (localParticipant.isScreenSharing && type === 'video') {
+      toast({ title: 'Cannot turn off video while screen sharing.' });
+      return;
+    }
 
-        const streamToToggle = userStreamRef.current;
-        if (!streamToToggle) {
-            toast({ variant: 'destructive', title: 'Media not available', description: 'Could not find a camera or microphone.' });
-            return p;
-        }
+    const streamToToggle = userStreamRef.current;
+    if (!streamToToggle) {
+        toast({ variant: 'destructive', title: 'Media not available', description: 'Could not find a camera or microphone.' });
+        return;
+    }
 
-        let mediaChanged = false;
-        streamToToggle.getTracks().forEach(track => {
-          if (track.kind === type) {
-            track.enabled = !track.enabled;
-            mediaChanged = true;
-          }
-        });
-        
-        if (!mediaChanged) {
-            toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
-            return p;
-        }
-
-        return { ...p, isMuted: type === 'audio' ? !p.isMuted : p.isMuted, isVideoOff: type === 'video' ? !p.isVideoOff : p.isVideoOff };
+    let mediaChanged = false;
+    let isEnabled = false;
+    streamToToggle.getTracks().forEach(track => {
+      if (track.kind === type) {
+        track.enabled = !track.enabled;
+        isEnabled = track.enabled;
+        mediaChanged = true;
       }
-      return p;
-    }));
+    });
+    
+    if (!mediaChanged) {
+        toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
+        return;
+    }
+
+    if (type === 'audio') {
+      updateLocalParticipant({ isMuted: !isEnabled });
+    } else {
+      updateLocalParticipant({ isVideoOff: !isEnabled });
+    }
   };
 
   return (
