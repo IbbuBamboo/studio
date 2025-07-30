@@ -8,7 +8,7 @@ import { MediaControls } from '@/components/room/MediaControls';
 import { ChatSidebar } from '@/components/room/ChatSidebar';
 import { Button } from '@/components/ui/button';
 import { Users, MessageSquare, MessageSquareOff, Copy } from 'lucide-react';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
