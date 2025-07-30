@@ -124,7 +124,7 @@ function RoomPageContent() {
         setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: false, isVideoOff: !userStreamRef.current?.getVideoTracks()[0]?.enabled} : p));
     } else {
         try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             screenStreamRef.current = stream;
             setLocalParticipantStream(stream);
             setParticipants(prev => prev.map(p => p.isLocal ? {...p, isScreenSharing: true, isVideoOff: false} : p));
@@ -150,7 +150,7 @@ function RoomPageContent() {
             return p;
         }
 
-        const streamToToggle = p.isScreenSharing ? screenStreamRef.current : userStreamRef.current;
+        const streamToToggle = userStreamRef.current;
         if (!streamToToggle) {
             toast({ variant: 'destructive', title: 'Media not available', description: 'Could not find a camera or microphone.' });
             return p;
@@ -177,7 +177,6 @@ function RoomPageContent() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-foreground">
-      <Toaster />
       <header className="flex items-center justify-between p-4 border-b shrink-0">
         <h1 className="text-xl font-bold font-headline text-primary truncate">
           Secure-chat: <span className="text-foreground">{roomId}</span>
@@ -199,7 +198,7 @@ function RoomPageContent() {
                 <SheetTrigger asChild>
                   <Button variant="ghost" size="icon"><MessageSquare /></Button>
                 </SheetTrigger>
-                <SheetContent className="flex flex-col p-0">
+                <SheetContent side="right" className="flex flex-col p-0 w-full max-w-sm">
                   <ChatSidebar messages={messages} onSendMessage={handleSendMessage} />
                 </SheetContent>
               </Sheet>
@@ -220,7 +219,7 @@ function RoomPageContent() {
         </div>
 
         {isChatOpen && (
-          <aside className="w-80 border-l hidden md:flex flex-col">
+          <aside className="w-full max-w-xs border-l hidden md:flex flex-col">
             <ChatSidebar messages={messages} onSendMessage={handleSendMessage} />
           </aside>
         )}
