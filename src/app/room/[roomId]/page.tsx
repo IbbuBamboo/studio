@@ -130,13 +130,7 @@ function RoomPageContent() {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         
         stream.getVideoTracks()[0].onended = () => {
-          screenStreamRef.current = null;
-          const isVideoStillOff = userStreamRef.current?.getVideoTracks().every(t => !t.enabled) ?? true;
-          updateLocalParticipant({ 
-            stream: userStreamRef.current, 
-            isScreenSharing: false,
-            isVideoOff: isVideoStillOff,
-          });
+          handleToggleScreenShare(); // Call the toggle again to reset state
         };
         
         screenStreamRef.current = stream;
@@ -229,6 +223,8 @@ function RoomPageContent() {
             onToggleMute={() => toggleMedia('audio')}
             onToggleVideo={() => toggleMedia('video')}
             onToggleScreenShare={handleToggleScreenShare}
+            onToggleChat={() => setIsChatOpen(!isChatOpen)}
+            isChatOpen={isChatOpen}
             localParticipant={participants.find(p => p.isLocal)}
           />
         </div>

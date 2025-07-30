@@ -1,7 +1,7 @@
 'use client';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Mic, MicOff, Video, VideoOff, ScreenShare, ScreenShareOff, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, ScreenShare, ScreenShareOff, PhoneOff, MessageSquare, MessageSquareOff } from 'lucide-react';
 import type { Participant } from '@/app/room/[roomId]/page';
 import { cn } from '@/lib/utils';
 
@@ -10,19 +10,21 @@ interface MediaControlsProps {
   onToggleMute: () => void;
   onToggleVideo: () => void;
   onToggleScreenShare: () => void;
+  onToggleChat: () => void;
+  isChatOpen: boolean;
   localParticipant?: Participant;
 }
 
-export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleScreenShare, localParticipant }: MediaControlsProps) {
+export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleScreenShare, onToggleChat, isChatOpen, localParticipant }: MediaControlsProps) {
   const isMuted = localParticipant?.isMuted ?? true;
   const isVideoOff = localParticipant?.isVideoOff ?? true;
   const isScreenSharing = localParticipant?.isScreenSharing ?? false;
-  const hasAudio = localParticipant?.stream?.getAudioTracks().length ?? 0 > 0;
-  const hasVideo = localParticipant?.stream?.getVideoTracks().length ?? 0 > 0;
+  const hasAudio = !!localParticipant?.stream?.getAudioTracks().length;
+  const hasVideo = !!localParticipant?.stream?.getVideoTracks().length;
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="flex justify-center items-center gap-2 md:gap-4 p-4 mt-auto bg-card rounded-xl shadow-lg w-full max-w-md mx-auto">
+      <div className="flex justify-center items-center gap-2 md:gap-4 p-4 mt-auto bg-card rounded-xl shadow-lg w-full max-w-lg mx-auto">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant={isMuted ? "destructive" : "outline"} size="lg" className="rounded-full w-14 h-14 md:w-16 md:h-16" onClick={onToggleMute} disabled={!hasAudio}>
@@ -43,11 +45,20 @@ export function MediaControls({ onLeave, onToggleMute, onToggleVideo, onToggleSc
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="lg" className={cn("rounded-full w-14 h-14 md:w-16 md:h-16", isScreenSharing && "bg-accent text-accent-foreground hover:bg-accent/90")} onClick={onToggleScreenShare}>
+            <Button variant="outline" size="lg" className={cn("rounded-full w-14 h-14 md:w-16 md:h-16", isScreenSharing && "bg-accent text-accent-foreground hover:bg-accent/90")} onClick={onToggleScreenShare} disabled={!hasVideo}>
               {isScreenSharing ? <ScreenShareOff className="w-6 h-6 md:w-7 md:h-7" /> : <ScreenShare className="w-6 h-6 md:w-7 md:h-7" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>{isScreenSharing ? 'Stop Sharing' : 'Share Screen'}</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="lg" className={cn("rounded-full w-14 h-14 md:w-16 md:h-16 hidden md:flex", isChatOpen && "bg-accent text-accent-foreground hover:bg-accent/90")} onClick={onToggleChat}>
+              {isChatOpen ? <MessageSquareOff className="w-6 h-6 md:w-7 md:h-7" /> : <MessageSquare className="w-6 h-6 md:w-7 md:h-7" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{isChatOpen ? 'Hide Chat' : 'Show Chat'}</TooltipContent>
         </Tooltip>
         
         <div className="h-10 border-l mx-2"></div>
