@@ -143,7 +143,13 @@ function RoomPageContent() {
 
       } catch (err: any) {
         console.error('Failed to get screen share stream', err);
-        if (err.name === 'NotAllowedError') {
+        if (err.message && err.message.includes('disallowed by permissions policy')) {
+            toast({
+                variant: 'destructive',
+                title: 'Screen Share Blocked by Environment',
+                description: 'Your development environment is preventing screen sharing due to security permissions. This is not a bug in the app.'
+            });
+        } else if (err.name === 'NotAllowedError') {
              toast({ 
                 variant: 'destructive', 
                 title: 'Screen Share Permission Denied',
@@ -153,7 +159,7 @@ function RoomPageContent() {
             toast({ 
                 variant: 'destructive', 
                 title: 'Could Not Share Screen',
-                description: 'Your browser or environment may be blocking screen sharing.'
+                description: 'Your browser or an unknown issue may be blocking screen sharing.'
             });
         }
       }
