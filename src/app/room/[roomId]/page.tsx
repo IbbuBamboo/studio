@@ -57,14 +57,7 @@ function RoomPageContent() {
         isScreenSharing: false,
       };
       
-      // FOR TESTING: Add some mock participants to see the layout.
-      const mockParticipants: Participant[] = [
-        { id: 'mock1', name: 'Alice', stream: null, isMuted: true, isVideoOff: false },
-        { id: 'mock2', name: 'Bob', stream: null, isMuted: false, isVideoOff: true },
-        { id: 'mock3', name: 'Charlie', stream: null, isMuted: false, isVideoOff: false },
-      ];
-
-      setParticipants([localParticipant, ...mockParticipants]);
+      setParticipants([localParticipant]);
     };
 
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
