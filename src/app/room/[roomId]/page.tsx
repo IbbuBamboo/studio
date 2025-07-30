@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useState, Suspense, useRef } from 'react';
@@ -140,9 +141,21 @@ function RoomPageContent() {
           isVideoOff: false 
         });
 
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to get screen share stream', err);
-        toast({ variant: 'destructive', title: 'Could not share screen' });
+        if (err.name === 'NotAllowedError') {
+             toast({ 
+                variant: 'destructive', 
+                title: 'Screen Share Permission Denied',
+                description: 'You need to grant permission to share your screen.'
+            });
+        } else {
+            toast({ 
+                variant: 'destructive', 
+                title: 'Could Not Share Screen',
+                description: 'Your browser or environment may be blocking screen sharing.'
+            });
+        }
       }
     }
   };
