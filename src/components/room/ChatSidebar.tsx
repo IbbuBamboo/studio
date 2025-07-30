@@ -15,6 +15,12 @@ interface ChatSidebarProps {
 export function ChatSidebar({ messages, onSendMessage }: ChatSidebarProps) {
   const [newMessage, setNewMessage] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [timestamp, setTimestamp] = useState('');
+
+  useEffect(() => {
+    // This ensures timestamps are only generated on the client after hydration
+    setTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  }, [messages]);
 
   const handleSend = () => {
     if (newMessage.trim()) {

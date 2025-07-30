@@ -21,11 +21,9 @@ export default function HomePage() {
     let code = roomCode.trim();
 
     if (!code) {
-      // Create a new room
       code = generateRoomCode();
     }
     
-    // For now, we assume the room exists. In a real app, you'd verify this.
     router.push(`/room/${code}?name=${encodeURIComponent(name)}`);
   };
 
