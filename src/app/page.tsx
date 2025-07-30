@@ -8,13 +8,25 @@ import { Button } from '@/components/ui/button';
 import { Video } from 'lucide-react';
 
 export default function HomePage() {
-  const [roomId, setRoomId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [roomCode, setRoomCode] = useState('');
   const router = useRouter();
 
-  const handleJoinRoom = () => {
-    if (roomId.trim()) {
-      router.push(`/room/${roomId.trim()}`);
+  const generateRoomCode = () => {
+    return Math.random().toString(36).substring(2, 8);
+  }
+
+  const handleContinue = () => {
+    const name = displayName.trim() || 'Guest';
+    let code = roomCode.trim();
+
+    if (!code) {
+      // Create a new room
+      code = generateRoomCode();
     }
+    
+    // For now, we assume the room exists. In a real app, you'd verify this.
+    router.push(`/room/${code}?name=${encodeURIComponent(name)}`);
   };
 
   return (
@@ -26,25 +38,33 @@ export default function HomePage() {
               <Video className="w-12 h-12 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-3xl font-headline">AnonMeet</CardTitle>
-          <CardDescription>Real-time anonymous video meetings. No sign up required.</CardDescription>
+          <CardTitle className="text-3xl font-headline">Secure-chat</CardTitle>
+          <CardDescription>Create a new room or join an existing one. It's fast, secure, and anonymous.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <Input
               type="text"
-              placeholder="Enter Room Name"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleJoinRoom()}
+              placeholder="Enter your name (optional)"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
               className="py-6 text-center text-lg"
-              aria-label="Room Name"
+              aria-label="Display Name"
+            />
+            <Input
+              type="text"
+              placeholder="Enter room code (or leave blank to create)"
+              value={roomCode}
+              onChange={(e) => setRoomCode(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleContinue()}
+              className="py-6 text-center text-lg"
+              aria-label="Room Code"
             />
           </div>
         </CardContent>
         <CardFooter>
-          <Button onClick={handleJoinRoom} className="w-full py-6 text-lg" disabled={!roomId.trim()}>
-            Enter Room
+          <Button onClick={handleContinue} className="w-full py-6 text-lg">
+            Continue
           </Button>
         </CardFooter>
       </Card>

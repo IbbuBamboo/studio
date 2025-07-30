@@ -1,15 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 import { VideoGrid } from '@/components/room/VideoGrid';
 import { MediaControls } from '@/components/room/MediaControls';
 import { ChatSidebar } from '@/components/room/ChatSidebar';
 import { Button } from '@/components/ui/button';
-import { Users, MessageSquare, MessageSquareOff } from 'lucide-react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { Separator } from '@/components/ui/separator';
+import { Users, MessageSquare, MessageSquareOff, Copy } from 'lucide-react';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
@@ -29,11 +28,13 @@ export interface Message {
     timestamp: string;
 }
 
-export default function RoomPage() {
+function RoomPageContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const roomId = params.roomId as string;
+  const displayName = searchParams.get('name') || 'Guest';
   
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -44,7 +45,7 @@ export default function RoomPage() {
       .then(stream => {
         const localParticipant: Participant = {
           id: 'local',
-          name: 'You',
+          name: `${displayName} (You)`,
           stream,
           isMuted: false,
           isVideoOff: false,
@@ -58,14 +59,12 @@ export default function RoomPage() {
             id: 'peer-1', name: 'Alice', stream: new MediaStream(), isMuted: true, isVideoOff: false
           };
           setParticipants(prev => [...prev, mockParticipant1]);
-          toast({ title: 'Participant Joined', description: 'Alice has joined the room.' });
         }, 1500);
         setTimeout(() => {
           const mockParticipant2: Participant = {
             id: 'peer-2', name: 'Bob', stream: new MediaStream(), isMuted: false, isVideoOff: true
           };
           setParticipants(prev => [...prev, mockParticipant2]);
-          toast({ title: 'Participant Joined', description: 'Bob has joined the room.' });
         }, 2500);
       })
       .catch(err => {
@@ -80,7 +79,7 @@ export default function RoomPage() {
 
     // Mock incoming messages
     setTimeout(() => {
-      addMessage({ sender: 'Alice', content: 'Hello everyone!' });
+      addMessage({ sender: 'Alice', content: 'Hey everyone!' });
     }, 3500);
 
     return () => {
@@ -99,11 +98,16 @@ export default function RoomPage() {
   }
 
   const handleSendMessage = (content: string) => {
-    addMessage({ sender: 'You', content });
+    addMessage({ sender: displayName, content });
   };
   
   const handleLeave = () => {
     router.push('/');
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    toast({ title: 'Link Copied!', description: 'You can now share this link with others.' });
   };
 
   const toggleMedia = (type: 'audio' | 'video') => {
@@ -125,9 +129,13 @@ export default function RoomPage() {
       <Toaster />
       <header className="flex items-center justify-between p-4 border-b shrink-0">
         <h1 className="text-xl font-bold font-headline text-primary truncate">
-          AnonMeet: <span className="text-foreground">{roomId}</span>
+          Secure-chat: <span className="text-foreground">{roomId}</span>
         </h1>
         <div className="flex items-center gap-2 md:gap-4">
+            <Button variant="outline" size="sm" onClick={handleCopyLink} className="hidden sm:inline-flex">
+              <Copy className="w-4 h-4 mr-2" />
+              Copy Invite Link
+            </Button>
             <div className="flex items-center gap-2 p-2 rounded-md bg-secondary">
                 <Users className="w-5 h-5" />
                 <span className="font-semibold">{participants.length}</span>
@@ -155,7 +163,7 @@ export default function RoomPage() {
             onLeave={handleLeave}
             onToggleMute={() => toggleMedia('audio')}
             onToggleVideo={() => toggleMedia('video')}
-            onToggleScreenShare={() => toast({ title: 'Feature not implemented' })}
+            onToggleScreenShare={() => toast({ title: 'Screen sharing is not yet implemented.' })}
             localParticipant={participants.find(p => p.isLocal)}
           />
         </div>
@@ -168,4 +176,12 @@ export default function RoomPage() {
       </main>
     </div>
   );
+}
+
+export default function RoomPage() {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <RoomPageContent />
+        </Suspense>
+    )
 }
