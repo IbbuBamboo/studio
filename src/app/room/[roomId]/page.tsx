@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Users, MessageSquare, MessageSquareOff, Copy } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+
 
 export interface Participant {
   id: string;
@@ -40,41 +42,27 @@ function RoomPageContent() {
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [hasMediaPermission, setHasMediaPermission] = useState<boolean | null>(null);
+  
   const screenStreamRef = useRef<MediaStream | null>(null);
   const userStreamRef = useRef<MediaStream | null>(null);
 
 
   useEffect(() => {
-    const setupLocalParticipant = (stream: MediaStream | null) => {
-      userStreamRef.current = stream;
-      const localParticipant: Participant = {
-        id: 'local',
-        name: `${displayName} (You)`,
-        stream,
-        isMuted: stream === null,
-        isVideoOff: stream === null,
-        isLocal: true,
-        isScreenSharing: false,
-      };
-      
-      setParticipants([localParticipant]);
+    // Setup local participant without asking for permissions yet
+    const localParticipant: Participant = {
+      id: 'local',
+      name: `${displayName} (You)`,
+      stream: null,
+      isMuted: true,
+      isVideoOff: true,
+      isLocal: true,
+      isScreenSharing: false,
     };
-
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        setupLocalParticipant(stream);
-      })
-      .catch(err => {
-        console.error('Failed to get local stream', err);
-        toast({
-          variant: 'destructive',
-          title: 'No Camera/Mic Access',
-          description: 'You can still participate in chat.',
-        });
-        setupLocalParticipant(null);
-      });
+    setParticipants([localParticipant]);
       
     return () => {
+      // Cleanup streams on component unmount
       participants.forEach(p => p.stream?.getTracks().forEach(track => track.stop()));
       userStreamRef.current?.getTracks().forEach(track => track.stop());
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
@@ -110,6 +98,32 @@ function RoomPageContent() {
     );
   };
 
+  const requestMediaPermissions = async (): Promise<MediaStream | null> => {
+    if (userStreamRef.current) return userStreamRef.current;
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      userStreamRef.current = stream;
+      setHasMediaPermission(true);
+      updateLocalParticipant({
+        stream,
+        isMuted: false,
+        isVideoOff: false,
+      });
+      return stream;
+    } catch (err) {
+      console.error('Failed to get local stream', err);
+      setHasMediaPermission(false);
+      toast({
+        variant: 'destructive',
+        title: 'No Camera/Mic Access',
+        description: 'Please grant permission to use your camera and microphone.',
+      });
+      return null;
+    }
+  }
+
+
   const handleToggleScreenShare = async () => {
     const localParticipant = participants.find(p => p.isLocal);
     if (!localParticipant) return;
@@ -127,16 +141,23 @@ function RoomPageContent() {
       });
 
     } else {
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const stream = await requestMediaPermissions();
+        if (!stream) return;
         
-        stream.getVideoTracks()[0].onended = () => {
-          handleToggleScreenShare(); // Call the toggle again to reset state
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        
+        screenStream.getVideoTracks()[0].onended = () => {
+          // This will trigger if the user clicks the "Stop sharing" button in the browser UI
+          const currentLocal = participants.find(p => p.isLocal && p.isScreenSharing);
+          if (currentLocal) {
+            handleToggleScreenShare();
+          }
         };
         
-        screenStreamRef.current = stream;
+        screenStreamRef.current = screenStream;
         updateLocalParticipant({ 
-          stream: stream, 
+          stream: screenStream, 
           isScreenSharing: true, 
           isVideoOff: false 
         });
@@ -166,7 +187,7 @@ function RoomPageContent() {
     }
   };
 
-  const toggleMedia = (type: 'audio' | 'video') => {
+  const toggleMedia = async (type: 'audio' | 'video') => {
     const localParticipant = participants.find(p => p.isLocal);
     if (!localParticipant) return;
     
@@ -175,10 +196,10 @@ function RoomPageContent() {
       return;
     }
 
-    const streamToToggle = userStreamRef.current;
+    let streamToToggle = userStreamRef.current;
     if (!streamToToggle) {
-        toast({ variant: 'destructive', title: 'Media not available', description: 'Could not find a camera or microphone.' });
-        return;
+        streamToToggle = await requestMediaPermissions();
+        if (!streamToToggle) return;
     }
 
     let mediaChanged = false;
@@ -191,7 +212,7 @@ function RoomPageContent() {
       }
     });
     
-    if (!mediaChanged) {
+    if (!mediaChanged && hasMediaPermission) {
         toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
         return;
     }
@@ -237,6 +258,14 @@ function RoomPageContent() {
       <main className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col p-4 gap-4">
           <VideoGrid participants={participants} />
+          {hasMediaPermission === false && (
+             <Alert variant="destructive" className="max-w-xl mx-auto">
+              <AlertTitle>Camera and Microphone Blocked</AlertTitle>
+              <AlertDescription>
+                You have denied camera and microphone permissions. To share your video or audio, please enable them in your browser's site settings.
+              </AlertDescription>
+            </Alert>
+          )}
           <MediaControls
             onLeave={handleLeave}
             onToggleMute={() => toggleMedia('audio')}
