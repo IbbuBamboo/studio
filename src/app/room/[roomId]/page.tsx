@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState, Suspense, useRef } from 'react';
+import { useEffect, useState, Suspense, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 import { VideoGrid } from '@/components/room/VideoGrid';
@@ -12,6 +12,7 @@ import { Users, MessageSquare, MessageSquareOff, Copy } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { WebRTCManager } from '@/lib/webrtc';
 
 
 export interface Participant {
@@ -46,12 +47,19 @@ function RoomPageContent() {
   
   const screenStreamRef = useRef<MediaStream | null>(null);
   const userStreamRef = useRef<MediaStream | null>(null);
+  const webrtcManagerRef = useRef<WebRTCManager | null>(null);
 
+  const handleParticipantsChange = useCallback((newParticipants: Participant[]) => {
+      setParticipants(newParticipants);
+  }, []);
 
   useEffect(() => {
-    // Setup local participant without asking for permissions yet
+    webrtcManagerRef.current = new WebRTCManager(roomId, handleParticipantsChange);
+    
+    // Create local participant entry immediately
+    const localId = Math.random().toString(36).substring(2, 9);
     const localParticipant: Participant = {
-      id: 'local',
+      id: localId,
       name: `${displayName} (You)`,
       stream: null,
       isMuted: true,
@@ -60,15 +68,15 @@ function RoomPageContent() {
       isScreenSharing: false,
     };
     setParticipants([localParticipant]);
-      
+
     return () => {
-      // Cleanup streams on component unmount
-      participants.forEach(p => p.stream?.getTracks().forEach(track => track.stop()));
+      webrtcManagerRef.current?.hangUp();
       userStreamRef.current?.getTracks().forEach(track => track.stop());
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, displayName, handleParticipantsChange]);
+
 
   const addMessage = (msg: Omit<Message, 'id' | 'timestamp'>) => {
     const newMessage: Message = {
@@ -105,11 +113,17 @@ function RoomPageContent() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       userStreamRef.current = stream;
       setHasMediaPermission(true);
-      updateLocalParticipant({
-        stream,
-        isMuted: true,
-        isVideoOff: true,
-      });
+
+      const localParticipant = participants.find(p => p.isLocal);
+      if(localParticipant && webrtcManagerRef.current) {
+        webrtcManagerRef.current.joinRoom(stream, localParticipant);
+      }
+      
+      // Start with media off
+      stream.getAudioTracks().forEach(t => t.enabled = false);
+      stream.getVideoTracks().forEach(t => t.enabled = false);
+
+      updateLocalParticipant({ stream });
       return stream;
     } catch (err) {
       console.error('Failed to get local stream', err);
@@ -148,11 +162,7 @@ function RoomPageContent() {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         
         screenStream.getVideoTracks()[0].onended = () => {
-          // This will trigger if the user clicks the "Stop sharing" button in the browser UI
-          const currentLocal = participants.find(p => p.isLocal && p.isScreenSharing);
-          if (currentLocal) {
-            handleToggleScreenShare();
-          }
+          handleToggleScreenShare();
         };
         
         screenStreamRef.current = screenStream;
@@ -188,6 +198,12 @@ function RoomPageContent() {
   };
 
   const toggleMedia = async (type: 'audio' | 'video') => {
+    let streamToToggle = userStreamRef.current;
+    if (!streamToToggle) {
+        streamToToggle = await requestMediaPermissions();
+        if (!streamToToggle) return;
+    }
+
     const localParticipant = participants.find(p => p.isLocal);
     if (!localParticipant) return;
     
@@ -196,28 +212,14 @@ function RoomPageContent() {
       return;
     }
 
-    let streamToToggle = userStreamRef.current;
-    if (!streamToToggle) {
-        streamToToggle = await requestMediaPermissions();
-        if (!streamToToggle) return;
-    }
-
-    let mediaChanged = false;
-    let isEnabledNow = false;
-    
-    streamToToggle.getTracks().forEach(track => {
-      if (track.kind === type) {
-        const currentlyEnabled = track.enabled;
-        track.enabled = !currentlyEnabled;
-        isEnabledNow = !currentlyEnabled;
-        mediaChanged = true;
-      }
-    });
-    
-    if (!mediaChanged && hasMediaPermission === true) {
-        toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
+    let track = streamToToggle.getTracks().find(t => t.kind === type);
+    if(!track) {
+         toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
         return;
     }
+
+    const isEnabledNow = !track.enabled;
+    track.enabled = isEnabledNow;
 
     if (type === 'audio') {
       updateLocalParticipant({ isMuted: !isEnabledNow });
@@ -230,7 +232,7 @@ function RoomPageContent() {
     <div className="h-screen w-screen flex flex-col bg-background text-foreground">
       <header className="flex items-center justify-between p-4 border-b shrink-0">
         <h1 className="text-xl font-bold font-headline text-primary truncate">
-          Secure-chat: <span className="text-foreground">{roomId}</span>
+          AnonMeet: <span className="text-foreground">{roomId}</span>
         </h1>
         <div className="flex items-center gap-2 md:gap-4">
             <Button variant="outline" size="sm" onClick={handleCopyLink} className="hidden sm:inline-flex">

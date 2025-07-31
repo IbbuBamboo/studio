@@ -41,7 +41,7 @@ export default function HomePage() {
               <Video className="w-12 h-12 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-3xl font-headline">Secure-chat</CardTitle>
+          <CardTitle className="text-3xl font-headline">AnonMeet</CardTitle>
           <CardDescription>Create a new room or join an existing one. It's fast, secure, and anonymous.</CardDescription>
         </CardHeader>
         <CardContent>
