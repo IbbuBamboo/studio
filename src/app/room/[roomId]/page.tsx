@@ -49,15 +49,10 @@ function RoomPageContent() {
   const userStreamRef = useRef<MediaStream | null>(null);
   const webrtcManagerRef = useRef<WebRTCManager | null>(null);
 
-  const handleParticipantsChange = useCallback((newParticipants: Participant[]) => {
-      setParticipants(newParticipants);
-  }, []);
-
   useEffect(() => {
-    webrtcManagerRef.current = new WebRTCManager(roomId, handleParticipantsChange);
-    
-    // Create local participant entry immediately
-    const localId = Math.random().toString(36).substring(2, 9);
+    if (webrtcManagerRef.current) return;
+
+    const localId = `user_${Math.random().toString(36).substring(2, 9)}`;
     const localParticipant: Participant = {
       id: localId,
       name: `${displayName} (You)`,
@@ -67,15 +62,21 @@ function RoomPageContent() {
       isLocal: true,
       isScreenSharing: false,
     };
-    setParticipants([localParticipant]);
 
+    setParticipants([localParticipant]);
+    
+    webrtcManagerRef.current = new WebRTCManager(
+        roomId, 
+        localParticipant,
+        (newParticipants) => setParticipants(newParticipants)
+    );
+    
     return () => {
       webrtcManagerRef.current?.hangUp();
       userStreamRef.current?.getTracks().forEach(track => track.stop());
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, displayName, handleParticipantsChange]);
+  }, [roomId, displayName]);
 
 
   const addMessage = (msg: Omit<Message, 'id' | 'timestamp'>) => {
@@ -100,10 +101,8 @@ function RoomPageContent() {
     toast({ title: 'Link Copied!', description: 'You can now share this link with others.' });
   };
   
-  const updateLocalParticipant = (updates: Partial<Participant>) => {
-    setParticipants(prev =>
-      prev.map(p => (p.isLocal ? { ...p, ...updates } : p))
-    );
+  const updateLocalParticipantStream = (stream: MediaStream | null, updates: Partial<Participant>) => {
+    webrtcManagerRef.current?.updateLocalParticipant(stream, updates);
   };
 
   const requestMediaPermissions = async (): Promise<MediaStream | null> => {
@@ -114,16 +113,13 @@ function RoomPageContent() {
       userStreamRef.current = stream;
       setHasMediaPermission(true);
 
-      const localParticipant = participants.find(p => p.isLocal);
-      if(localParticipant && webrtcManagerRef.current) {
-        webrtcManagerRef.current.joinRoom(stream, localParticipant);
-      }
+      webrtcManagerRef.current?.joinRoom(stream);
       
       // Start with media off
       stream.getAudioTracks().forEach(t => t.enabled = false);
       stream.getVideoTracks().forEach(t => t.enabled = false);
 
-      updateLocalParticipant({ stream });
+      updateLocalParticipantStream(stream, {});
       return stream;
     } catch (err) {
       console.error('Failed to get local stream', err);
@@ -137,41 +133,45 @@ function RoomPageContent() {
     }
   }
 
-
   const handleToggleScreenShare = async () => {
     const localParticipant = participants.find(p => p.isLocal);
-    if (!localParticipant) return;
-
+    if (!localParticipant || !webrtcManagerRef.current) return;
+  
     if (localParticipant.isScreenSharing) {
+      // Stop screen sharing
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
       screenStreamRef.current = null;
       
       const isVideoStillOff = userStreamRef.current?.getVideoTracks().every(t => !t.enabled) ?? true;
       
-      updateLocalParticipant({ 
-        stream: userStreamRef.current, 
+      updateLocalParticipantStream(userStreamRef.current, { 
         isScreenSharing: false,
         isVideoOff: isVideoStillOff,
       });
-
+      webrtcManagerRef.current.replaceTrack(userStreamRef.current?.getVideoTracks()[0] || null);
+  
     } else {
-        const stream = await requestMediaPermissions();
-        if (!stream) return;
+      // Start screen sharing
+      const stream = await requestMediaPermissions();
+      if (!stream) return;
         
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         
-        screenStream.getVideoTracks()[0].onended = () => {
-          handleToggleScreenShare();
+        const screenTrack = screenStream.getVideoTracks()[0];
+        screenTrack.onended = () => {
+          if (webrtcManagerRef.current?.getLocalParticipant()?.isScreenSharing) {
+            handleToggleScreenShare();
+          }
         };
         
         screenStreamRef.current = screenStream;
-        updateLocalParticipant({ 
-          stream: screenStream, 
+        updateLocalParticipantStream(screenStream, { 
           isScreenSharing: true, 
           isVideoOff: false 
         });
-
+        webrtcManagerRef.current.replaceTrack(screenTrack);
+  
       } catch (err: any) {
         console.error('Failed to get screen share stream', err);
         if (err.message && err.message.includes('disallowed by permissions policy')) {
@@ -212,19 +212,18 @@ function RoomPageContent() {
       return;
     }
 
-    let track = streamToToggle.getTracks().find(t => t.kind === type);
+    const track = (type === 'audio' ? streamToToggle.getAudioTracks() : streamToToggle.getVideoTracks())[0];
     if(!track) {
          toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
         return;
     }
 
-    const isEnabledNow = !track.enabled;
-    track.enabled = isEnabledNow;
+    track.enabled = !track.enabled;
 
     if (type === 'audio') {
-      updateLocalParticipant({ isMuted: !isEnabledNow });
+      updateLocalParticipantStream(userStreamRef.current, { isMuted: !track.enabled });
     } else {
-      updateLocalParticipant({ isVideoOff: !isEnabledNow });
+      updateLocalParticipantStream(userStreamRef.current, { isVideoOff: !track.enabled });
     }
   };
 
@@ -232,7 +231,7 @@ function RoomPageContent() {
     <div className="h-screen w-screen flex flex-col bg-background text-foreground">
       <header className="flex items-center justify-between p-4 border-b shrink-0">
         <h1 className="text-xl font-bold font-headline text-primary truncate">
-          AnonMeet: <span className="text-foreground">{roomId}</span>
+          Secure Chat: <span className="text-foreground">{roomId}</span>
         </h1>
         <div className="flex items-center gap-2 md:gap-4">
             <Button variant="outline" size="sm" onClick={handleCopyLink} className="hidden sm:inline-flex">

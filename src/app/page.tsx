@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Video } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 
 export default function HomePage() {
   const [displayName, setDisplayName] = useState('');
@@ -38,10 +38,10 @@ export default function HomePage() {
         <CardHeader className="text-center">
           <div className="flex justify-center items-center mb-4">
             <div className="p-4 bg-primary/20 rounded-full">
-              <Video className="w-12 h-12 text-primary" />
+              <ShieldCheck className="w-12 h-12 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-3xl font-headline">AnonMeet</CardTitle>
+          <CardTitle className="text-3xl font-headline">Secure Chat</CardTitle>
           <CardDescription>Create a new room or join an existing one. It's fast, secure, and anonymous.</CardDescription>
         </CardHeader>
         <CardContent>

@@ -4,7 +4,7 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 
 export const metadata: Metadata = {
-  title: 'AnonMeet',
+  title: 'Secure Chat',
   description: 'Anonymous video and text chat',
 };
 

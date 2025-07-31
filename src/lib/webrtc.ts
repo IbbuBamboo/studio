@@ -4,13 +4,14 @@ import {
   doc,
   collection,
   addDoc,
+  setDoc,
   getDoc,
-  updateDoc,
   deleteDoc,
   onSnapshot,
   writeBatch,
+  getDocs,
   query,
-  getDocs
+  collectionGroup,
 } from 'firebase/firestore';
 import type { Participant } from '@/app/room/[roomId]/page';
 
@@ -24,156 +25,217 @@ const servers = {
 };
 
 export class WebRTCManager {
-  private pc: RTCPeerConnection;
+  private peerConnections: { [key: string]: RTCPeerConnection } = {};
   private localStream: MediaStream | null = null;
-  private remoteStreams: { [key: string]: MediaStream } = {};
   private roomId: string;
-  private onParticipantsChange: (participants: Participant[]) => void;
+  private localParticipant: Participant;
   private participants: Participant[] = [];
-  private localParticipantId: string | null = null;
+  private onParticipantsChange: (participants: Participant[]) => void;
   private roomRef: any;
   private unsubscribes: (() => void)[] = [];
 
-
-  constructor(roomId: string, onParticipantsChange: (participants: Participant[]) => void) {
-    this.pc = new RTCPeerConnection(servers);
+  constructor(roomId: string, localParticipant: Participant, onParticipantsChange: (participants: Participant[]) => void) {
     this.roomId = roomId;
+    this.localParticipant = localParticipant;
+    this.participants = [localParticipant];
     this.onParticipantsChange = onParticipantsChange;
     this.roomRef = doc(db, 'rooms', this.roomId);
+    this.updateParticipants();
   }
 
   private updateParticipants() {
-    this.onParticipantsChange([...this.participants]);
+    // Ensure local participant is always first
+    const local = this.participants.find(p => p.isLocal);
+    const remote = this.participants.filter(p => !p.isLocal);
+    this.onParticipantsChange(local ? [local, ...remote] : [...remote]);
+  }
+  
+  public getLocalParticipant(): Participant | undefined {
+    return this.participants.find(p => p.isLocal);
   }
 
-  public async joinRoom(localStream: MediaStream, localParticipant: Participant) {
-    this.localStream = localStream;
-    this.localParticipantId = localParticipant.id;
-
-    this.participants.push(localParticipant);
-    this.updateParticipants();
-    
-    this.localStream.getTracks().forEach(track => {
-      this.pc.addTrack(track, this.localStream!);
+  public async joinRoom(stream: MediaStream) {
+    this.localStream = stream;
+    this.updateLocalParticipant(stream, {
+        isMuted: stream.getAudioTracks().every(t => !t.enabled),
+        isVideoOff: stream.getVideoTracks().every(t => !t.enabled),
     });
 
-    const roomSnapshot = await getDoc(this.roomRef);
-    if (!roomSnapshot.exists()) {
-      await writeBatch(db).set(this.roomRef, {}).commit();
-    }
+    await setDoc(doc(this.roomRef, 'participants', this.localParticipant.id), {
+      name: this.localParticipant.name,
+    });
     
-    const callerCandidatesCollection = collection(this.roomRef, 'callerCandidates');
-    const calleeCandidatesCollection = collection(this.roomRef, 'calleeCandidates');
+    this.listenForParticipants();
+  }
+  
+  private listenForParticipants() {
+    const participantsCollection = collection(this.roomRef, 'participants');
+    const unsubscribe = onSnapshot(participantsCollection, (snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        const participantId = change.doc.id;
+        const participantData = change.doc.data();
 
-    this.pc.onicecandidate = event => {
-      if(event.candidate) {
-        addDoc(callerCandidatesCollection, event.candidate.toJSON());
+        if (participantId === this.localParticipant.id) return;
+
+        if (change.type === 'added') {
+          console.log('Participant added:', participantId);
+          this.createPeerConnection(participantId, participantData.name);
+          // The creator of the room (first one in) will initiate the offers
+          const roomSnapshot = await getDoc(this.roomRef);
+          if (roomSnapshot.data()?.creator === this.localParticipant.id) {
+             await this.createOffer(participantId);
+          }
+        } else if (change.type === 'removed') {
+          console.log('Participant removed:', participantId);
+          this.closePeerConnection(participantId);
+        }
+      });
+    });
+    this.unsubscribes.push(unsubscribe);
+  }
+  
+  private createPeerConnection(participantId: string, name: string) {
+    if (this.peerConnections[participantId]) {
+      console.warn('Peer connection already exists for', participantId);
+      return;
+    }
+
+    const pc = new RTCPeerConnection(servers);
+    this.peerConnections[participantId] = pc;
+
+    this.localStream?.getTracks().forEach(track => {
+      pc.addTrack(track, this.localStream!);
+    });
+
+    const remoteStream = new MediaStream();
+    this.participants = [...this.participants.filter(p => p.id !== participantId), {
+      id: participantId,
+      name: name,
+      stream: remoteStream,
+      isMuted: true,
+      isVideoOff: true,
+      isLocal: false
+    }];
+    this.updateParticipants();
+
+    pc.ontrack = (event) => {
+      event.streams[0].getTracks().forEach(track => {
+        remoteStream.addTrack(track);
+      });
+    };
+    
+    // Listen for offers for this specific peer connection
+    const participantDoc = doc(this.roomRef, 'participants', this.localParticipant.id, 'connections', participantId);
+    this.unsubscribes.push(onSnapshot(participantDoc, async (snapshot) => {
+      const data = snapshot.data();
+      if (data?.offer) {
+        console.log('Received offer from', participantId);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        await this.createAnswer(participantId);
+      }
+      if (data?.answer && !pc.currentRemoteDescription) {
+        console.log('Received answer from', participantId);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      }
+    }));
+    
+    const iceCandidatesCollection = collection(participantDoc, 'iceCandidates');
+    this.unsubscribes.push(onSnapshot(iceCandidatesCollection, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+                pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            }
+        });
+    }));
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const targetIceCandidates = collection(this.roomRef, 'participants', participantId, 'connections', this.localParticipant.id, 'iceCandidates');
+        addDoc(targetIceCandidates, event.candidate.toJSON());
       }
     };
 
-    const offerDescription = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offerDescription);
-
-    const offer = {
-      sdp: offerDescription.sdp,
-      type: offerDescription.type,
-    };
-    
-    await updateDoc(this.roomRef, { offer });
-
-    this.unsubscribes.push(onSnapshot(this.roomRef, (snapshot) => {
-        const data = snapshot.data();
-        if (!this.pc.currentRemoteDescription && data?.answer) {
-          const answerDescription = new RTCSessionDescription(data.answer);
-          this.pc.setRemoteDescription(answerDescription);
-        }
-      })
-    );
-      
-    this.unsubscribes.push(onSnapshot(calleeCandidatesCollection, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const candidate = new RTCIceCandidate(change.doc.data());
-            this.pc.addIceCandidate(candidate);
-          }
-        });
-      })
-    );
-
-    this.pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach(track => {
-            // A bit of a hack to get a remote stream into a single object
-            // Usually you'd have one peer connection per remote participant
-            Object.values(this.remoteStreams)[0]?.addTrack(track)
-        });
-    };
-    
-    // For simplicity, we'll model this as one giant call, not peer-to-peer.
-    // This is not scalable but works for a small number of participants.
-    this.setupPeerConnections();
   }
   
-  // This is a simplified "mesh" where we connect to everyone.
-  // A real app would use a SFU for efficiency.
-  private async setupPeerConnections() {
-      // Create a "participant" document in firestore
-      const participantRef = doc(collection(this.roomRef, 'participants'), this.localParticipantId!);
-      await setDoc(participantRef, { name: this.participants.find(p => p.isLocal)!.name });
+  private async createOffer(participantId: string) {
+    const pc = this.peerConnections[participantId];
+    if (!pc) return;
 
-      this.unsubscribes.push(onSnapshot(collection(this.roomRef, 'participants'), (snapshot) => {
-        const remoteParticipants: Participant[] = [];
-        snapshot.docs.forEach(doc => {
-          if (doc.id !== this.localParticipantId) {
-             const remoteStream = new MediaStream();
-             this.remoteStreams[doc.id] = remoteStream;
-             remoteParticipants.push({
-                 id: doc.id,
-                 name: doc.data().name,
-                 stream: remoteStream,
-                 isMuted: true, // Cannot determine this without more signaling
-                 isVideoOff: true, // Cannot determine this without more signaling
-                 isLocal: false
-             });
-          }
-        });
+    const offerDescription = await pc.createOffer();
+    await pc.setLocalDescription(offerDescription);
 
-        this.participants = [this.participants.find(p => p.isLocal)!, ...remoteParticipants];
-        this.updateParticipants();
-      }));
+    const offer = { type: offerDescription.type, sdp: offerDescription.sdp };
+    const connectionDoc = doc(this.roomRef, 'participants', participantId, 'connections', this.localParticipant.id);
+    await setDoc(connectionDoc, { offer }, { merge: true });
+    console.log('Sent offer to', participantId);
+  }
+  
+  private async createAnswer(participantId: string) {
+    const pc = this.peerConnections[participantId];
+    if (!pc) return;
+
+    const answerDescription = await pc.createAnswer();
+    await pc.setLocalDescription(answerDescription);
+
+    const answer = { type: answerDescription.type, sdp: answerDescription.sdp };
+    const connectionDoc = doc(this.roomRef, 'participants', this.localParticipant.id, 'connections', participantId);
+    await setDoc(connectionDoc, { answer }, { merge: true });
+    console.log('Sent answer to', participantId);
+  }
+
+  private closePeerConnection(participantId: string) {
+    this.peerConnections[participantId]?.close();
+    delete this.peerConnections[participantId];
+    this.participants = this.participants.filter(p => p.id !== participantId);
+    this.updateParticipants();
   }
 
   public async hangUp() {
-    this.pc.close();
     this.unsubscribes.forEach(unsub => unsub());
 
-    if(this.localParticipantId){
-       await deleteDoc(doc(collection(this.roomRef, 'participants'), this.localParticipantId));
+    Object.keys(this.peerConnections).forEach(id => this.closePeerConnection(id));
+
+    if (this.localParticipant.id) {
+       const participantDoc = doc(this.roomRef, 'participants', this.localParticipant.id);
+       const connectionsQuery = query(collection(participantDoc, 'connections'));
+       const connectionsSnapshot = await getDocs(connectionsQuery);
+       const batch = writeBatch(db);
+       connectionsSnapshot.forEach(doc => batch.delete(doc.ref));
+       batch.delete(participantDoc);
+       await batch.commit();
     }
     
-    const roomSnapshot = await getDoc(this.roomRef);
-    const participantsQuery = query(collection(this.roomRef, 'participants'));
-    const participantsSnapshot = await getDocs(participantsQuery);
-
-    // If last participant, delete the room and its subcollections
-    if (roomSnapshot.exists() && participantsSnapshot.empty) {
-        const callerCandidatesQuery = query(collection(this.roomRef, 'callerCandidates'));
-        const calleeCandidatesQuery = query(collection(this.roomRef, 'calleeCandidates'));
-        const callerCandidates = await getDocs(callerCandidatesQuery);
-        const calleeCandidates = await getDocs(calleeCandidatesQuery);
-        
-        const batch = writeBatch(db);
-        callerCandidates.forEach(doc => batch.delete(doc.ref));
-        calleeCandidates.forEach(doc => batch.delete(doc.ref));
-        batch.delete(this.roomRef);
-        await batch.commit();
+    // Check if room is empty to clean up
+    const roomParticipantsSnapshot = await getDocs(collection(this.roomRef, 'participants'));
+    if (roomParticipantsSnapshot.empty) {
+        // More robust cleanup needed for all subcollections in a real app
+        await deleteDoc(this.roomRef);
     }
   }
 
-  public toggleMedia(type: 'audio' | 'video', enabled: boolean) {
-    this.localStream?.getTracks().forEach(track => {
-      if (track.kind === type) {
-        track.enabled = enabled;
-      }
-    });
+  public updateLocalParticipant(stream: MediaStream | null, updates: Partial<Participant>) {
+    this.localParticipant = { ...this.localParticipant, stream, ...updates };
+    this.participants = this.participants.map(p => p.isLocal ? this.localParticipant : p);
+    this.updateParticipants();
+  }
+
+  public replaceTrack(newTrack: MediaStreamTrack | null) {
+    if (!this.localStream) return;
+  
+    const videoSender = Object.values(this.peerConnections)
+      .flatMap(pc => pc.getSenders())
+      .find(sender => sender.track?.kind === 'video');
+  
+    if (videoSender) {
+        if (newTrack) {
+            videoSender.replaceTrack(newTrack);
+        } else {
+            // Revert to the original camera track if it exists
+            const originalVideoTrack = this.localStream.getVideoTracks()[0];
+            if (originalVideoTrack) {
+                videoSender.replaceTrack(originalVideoTrack);
+            }
+        }
+    }
   }
 }
