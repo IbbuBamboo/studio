@@ -107,8 +107,8 @@ function RoomPageContent() {
       setHasMediaPermission(true);
       updateLocalParticipant({
         stream,
-        isMuted: false,
-        isVideoOff: false,
+        isMuted: true,
+        isVideoOff: true,
       });
       return stream;
     } catch (err) {
@@ -203,24 +203,26 @@ function RoomPageContent() {
     }
 
     let mediaChanged = false;
-    let isEnabled = false;
+    let isEnabledNow = false;
+    
     streamToToggle.getTracks().forEach(track => {
       if (track.kind === type) {
-        track.enabled = !track.enabled;
-        isEnabled = track.enabled;
+        const currentlyEnabled = track.enabled;
+        track.enabled = !currentlyEnabled;
+        isEnabledNow = !currentlyEnabled;
         mediaChanged = true;
       }
     });
     
-    if (!mediaChanged && hasMediaPermission) {
+    if (!mediaChanged && hasMediaPermission === true) {
         toast({ variant: 'destructive', title: 'Media not available', description: `Could not find a ${type} track.` });
         return;
     }
 
     if (type === 'audio') {
-      updateLocalParticipant({ isMuted: !isEnabled });
+      updateLocalParticipant({ isMuted: !isEnabledNow });
     } else {
-      updateLocalParticipant({ isVideoOff: !isEnabled });
+      updateLocalParticipant({ isVideoOff: !isEnabledNow });
     }
   };
 
