@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -13,17 +14,21 @@ export default function HomePage() {
   const router = useRouter();
 
   const generateRoomCode = () => {
+    // Simple random string for room code
     return Math.random().toString(36).substring(2, 8);
   }
 
   const handleContinue = () => {
+    // Use "Guest" if display name is empty
     const name = displayName.trim() || 'Guest';
     let code = roomCode.trim();
 
+    // Generate a new room code if the user didn't provide one
     if (!code) {
       code = generateRoomCode();
     }
     
+    // Navigate to the room, passing the name as a query parameter
     router.push(`/room/${code}?name=${encodeURIComponent(name)}`);
   };
 
